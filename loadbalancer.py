@@ -12,13 +12,16 @@ def get_topology():
     for link in data:
         src = link['src-switch']
         dst = link['dst-switch']
-        port = link['src-port']
-        weight = 1  # Mặc định, bạn có thể điều chỉnh trọng số dựa trên băng thông
-        graph.add_edge(src, dst, port=port, weight=weight)
+        src_port = link['src-port']
+        dst_port = link['dst-port']
+        weight = 1  # Mặc định trọng số
+
+        # Thêm liên kết giữa các switch và gán cổng để tham chiếu trong luồng dữ liệu
+        graph.add_edge(src, dst, src_port=src_port, dst_port=dst_port, weight=weight)
     
     return graph
 
-# Lấy thống kê của các cổng switch
+# Lấy thống kê cổng của một switch
 def get_link_statistics(switch_id, port):
     url = f"http://127.0.0.1:8080/wm/statistics/port/{switch_id}/{port}/json"
     response = requests.get(url)
@@ -52,14 +55,16 @@ def apply_load_balancing(graph, src_host, dst_host, src_ip, dst_ip):
     min_load_path = None
     min_load = float('inf')
 
+    # Tính toán tải cho mỗi đường đi để chọn đường ít tải nhất
     for path in paths:
         path_load = 0
 
         for i in range(len(path) - 1):
             src = path[i]
-            dst = path[i+1]
-            port = graph[src][dst]['port']
-            stats = get_link_statistics(src, port)
+            dst = path[i + 1]
+            src_port = graph[src][dst]['src_port']
+            
+            stats = get_link_statistics(src, src_port)
             
             if stats and len(stats) > 0:
                 path_load += stats[0]['bits-per-second-tx'] + stats[0]['bits-per-second-rx']
@@ -72,9 +77,9 @@ def apply_load_balancing(graph, src_host, dst_host, src_ip, dst_ip):
     if min_load_path:
         for i in range(len(min_load_path) - 1):
             src_switch = min_load_path[i]
-            dst_switch = min_load_path[i+1]
-            in_port = graph[min_load_path[i+1]][min_load_path[i]]['port']
-            out_port = graph[min_load_path[i]][min_load_path[i+1]]['port']
+            dst_switch = min_load_path[i + 1]
+            in_port = graph[dst_switch][src_switch]['dst_port']
+            out_port = graph[src_switch][dst_switch]['src_port']
             push_flow_rule(src_switch, in_port, out_port, src_ip, dst_ip)
 
 # Hàm chính để khởi động load balancer
