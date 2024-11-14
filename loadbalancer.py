@@ -2,22 +2,38 @@ import requests
 import networkx as nx
 import time
 
-# Lấy thông tin topology từ Floodlight và xây dựng đồ thị NetworkX
+# Lấy thông tin topology từ Floodlight và xây dựng đồ thị NetworkX, bao gồm cả host và switch
 def get_topology():
-    url = "http://127.0.0.1:8080/wm/topology/links/json"
-    response = requests.get(url)
-    data = response.json()
+    url_links = "http://127.0.0.1:8080/wm/topology/links/json"
+    url_hosts = "http://127.0.0.1:8080/wm/device/"
+    
+    # Tạo đồ thị NetworkX
     graph = nx.Graph()
 
-    for link in data:
+    # Thêm các liên kết giữa các switch
+    response_links = requests.get(url_links)
+    links = response_links.json()
+    for link in links:
         src = link['src-switch']
         dst = link['dst-switch']
         src_port = link['src-port']
         dst_port = link['dst-port']
-        weight = 1  # Mặc định trọng số
+        weight = 1  # Trọng số mặc định cho liên kết giữa switch
 
-        # Thêm liên kết giữa các switch và gán cổng để tham chiếu trong luồng dữ liệu
+        # Thêm cạnh giữa các switch trong đồ thị
         graph.add_edge(src, dst, src_port=src_port, dst_port=dst_port, weight=weight)
+
+    # Thêm host vào đồ thị và kết nối với switch tương ứng
+    response_hosts = requests.get(url_hosts)
+    hosts = response_hosts.json()
+    for host in hosts:
+        if len(host['attachmentPoint']) > 0:
+            host_id = host['mac'][0]
+            attached_switch = host['attachmentPoint'][0]['switchDPID']
+            attached_port = host['attachmentPoint'][0]['port']
+            
+            # Thêm host vào đồ thị và kết nối với switch qua cổng tương ứng
+            graph.add_edge(host_id, attached_switch, src_port=None, dst_port=attached_port, weight=1)
     
     return graph
 
@@ -64,6 +80,10 @@ def apply_load_balancing(graph, src_host, dst_host, src_ip, dst_ip):
             dst = path[i + 1]
             src_port = graph[src][dst]['src_port']
             
+            # Nếu src_port không tồn tại (host kết nối), bỏ qua bước tính toán tải
+            if src_port is None:
+                continue
+            
             stats = get_link_statistics(src, src_port)
             
             if stats and len(stats) > 0:
@@ -85,7 +105,7 @@ def apply_load_balancing(graph, src_host, dst_host, src_ip, dst_ip):
 # Hàm chính để khởi động load balancer
 def main():
     graph = get_topology()
-    src_host, dst_host = "h1", "h4"
+    src_host, dst_host = "10:00:00:00:00:01", "10:00:00:00:00:04"  # MAC của h1 và h4
     src_ip, dst_ip = "10.0.0.1", "10.0.0.4"
 
     while True:
